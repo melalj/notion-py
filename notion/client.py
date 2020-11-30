@@ -129,7 +129,10 @@ class NotionClient(object):
 
         self._store.store_recordmap(records)
         self.current_user = self.get_user(list(records["notion_user"].keys())[0])
-        self.current_space = self.get_space(list(records["space"].keys())[0])
+        if len(list(records["space"].keys())) > 0:
+            self.current_space = self.get_space(list(records["space"].keys())[0])
+        else :
+            self.current_space = {}
         return records
 
     def get_email_uid(self):
