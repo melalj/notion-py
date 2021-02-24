@@ -545,8 +545,9 @@ class CollectionRowBlock(PageBlock):
     def get_all_properties(self):
         allprops = {}
         for prop in self.schema:
-            propid = slugify(prop["name"])
-            allprops[propid] = self.get_property(propid)
+            if "name" in prop:
+                propid = slugify(prop["name"])
+                allprops[propid] = self.get_property(propid)
         return allprops
 
     def set_property(self, identifier, val):
