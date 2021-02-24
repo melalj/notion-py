@@ -166,9 +166,10 @@ class Collection(Record):
         properties = []
         schema = self.get("schema")
         for id, item in schema.items():
-            prop = {"id": id, "slug": slugify(item["name"])}
-            prop.update(item)
-            properties.append(prop)
+            if "name" in item:
+                prop = {"id": id, "slug": slugify(item["name"])}
+                prop.update(item)
+                properties.append(prop)
         return properties
 
     def check_schema_select_options(self, prop, values):
