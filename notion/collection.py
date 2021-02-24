@@ -42,12 +42,8 @@ class NotionDate(object):
         start = cls._parse_datetime(data.get("start_date"), data.get("start_time"))
         end = cls._parse_datetime(data.get("end_date"), data.get("end_time"))
         timezone = data.get("time_zone")
-<<<<<<< HEAD
         reminder = data.get("reminder")
         return cls(start, end=end, timezone=timezone, reminder=reminder)
-=======
-        return cls(start, end=end, timezone=timezone)
->>>>>>> fixed timezone
 
     @classmethod
     def _parse_datetime(cls, date_str, time_str):
