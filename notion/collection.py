@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, date
 from tzlocal import get_localzone
 from uuid import uuid1
+import pytz
 
 from .block import Block, PageBlock, Children, CollectionViewBlock
 from .logger import logger
@@ -44,6 +45,22 @@ class NotionDate(object):
         timezone = data.get("time_zone")
         reminder = data.get("reminder")
         return cls(start, end=end, timezone=timezone, reminder=reminder)
+
+    @classmethod
+    def from_notion_tz(cls, obj):
+        if isinstance(obj, dict):
+            data = obj
+        elif isinstance(obj, list):
+            data = obj[0][1][0][1]
+        else:
+            return None
+        start_utc = cls._parse_datetime(data.get("start_date"), data.get("start_time"))
+        end_tc = cls._parse_datetime(data.get("end_date"), data.get("end_time"))
+        timezone = data.get("time_zone") or 'UTC'
+
+        start = start_utc.replace(tzinfo=pytz.timezone(timezone)).isoformat()
+        end = end_utc.replace(tzinfo=pytz.timezone(timezone)).isoformat()
+        return cls(start, end=end)
 
     @classmethod
     def _parse_datetime(cls, date_str, time_str):
@@ -441,6 +458,18 @@ class CollectionRowBlock(PageBlock):
     def __dir__(self):
         return self._get_property_slugs() + super().__dir__()
 
+    def get_api_property(self, identifier):
+
+        prop = self.collection.get_schema_property(identifier)
+        if prop is None:
+            raise AttributeError(
+                "Object does not have property '{}'".format(identifier)
+            )
+
+        val = self.get(["properties", prop["id"]])
+
+        return self._convert_notion_to_api(val, prop)
+
     def get_property(self, identifier):
 
         prop = self.collection.get_schema_property(identifier)
@@ -485,6 +514,126 @@ class CollectionRowBlock(PageBlock):
             remaining, old_val, new_val
         )
 
+    def _convert_notion_to_api(self, val, prop):
+
+        if prop["type"] in ["title"]:
+            text = notion_to_markdown(val) if val else None
+            val = {
+                "id": prop['id'],
+                "type": "title",
+                "title": [{
+                    "type": "text",
+                    "text": {
+                        "content": text,
+                    },
+                    "plain_text": text,
+                }]
+            }
+        if prop["type"] in ["text"]:
+            text = notion_to_markdown(val) if val else None
+            val = {
+                "id": prop['id'],
+                "type": "text",
+                "text": [{
+                    "type": "text",
+                    "text": {
+                        "content": text,
+                    },
+                    "plain_text": text,
+                }]
+            }
+        if prop["type"] in ["number"]:
+            text = None
+            if val is not None:
+                text = val[0][0]
+                if "." in val:
+                    text = float(val)
+                else:
+                    text = int(val)
+            val = {
+                "id": prop['id'],
+                "type": "number",
+                "number": text
+            }
+        if prop["type"] in ["select"]:
+            text = val[0][0]
+            options = (x for x in prop["select"]["options"] if x['name'] == text)
+
+            if len(options) > 0:
+                val = {
+                    "id": prop['id'],
+                    "type": "select",
+                    "select": options[0]
+                }
+            else :
+                val = None
+        if prop["type"] in ["multi_select"]:
+            items = [v.strip() for v in val[0][0].split(",")] if val else []
+            options = (x for x in prop["multi_select"]["options"] if x['name'] in items)
+
+            val = {
+                "id": prop['id'],
+                "type": "multi_select",
+                "multi_select": options
+            }
+        if prop["type"] in ["person"]:
+            people = (
+                [self._client.get_user(item[1][0][1]) for item in val if item[0] == "‣"]
+                if val
+                else []
+            )
+            val = {
+                "id": prop['id'],
+                "type": "people",
+                "people": people
+            }
+        if prop["type"] in ["email", "phone_number", "url"]:
+            text = val[0][0] if val else ""
+            val {
+                "id": prop['id'],
+                "type": prop['type'],
+            }
+            val[prop['type']] = text
+        if prop["type"] in ["date"]:
+            date_obj = NotionDate.from_notion(val)
+            val {
+                "id": prop['id'],
+                "type": prop['type'],
+                "date": date_obj
+            }
+        if prop["type"] in ["file"]:
+            val = (
+                [
+                    add_signed_prefix_as_needed(
+                        item[1][0][1], client=self._client, id=self.id
+                    )
+                    for item in val
+                    if item[0] != ","
+                ]
+                if val
+                else []
+            )
+        if prop["type"] in ["checkbox"]:
+            val = val[0][0] == "Yes" if val else False
+        if prop["type"] in ["relation"]:
+            val = (
+                [
+                    self._client.get_block(item[1][0][1])
+                    for item in val
+                    if item[0] == "‣"
+                ]
+                if val
+                else []
+            )
+        if prop["type"] in ["created_time", "last_edited_time"]:
+            val = self.get(prop["type"])
+            val = datetime.utcfromtimestamp(val / 1000)
+        if prop["type"] in ["created_by", "last_edited_by"]:
+            val = self.get(prop["type"] + "_id")
+            val = self._client.get_user(val)
+
+        return val
+    
     def _convert_notion_to_python(self, val, prop):
 
         if prop["type"] in ["title", "text"]:
