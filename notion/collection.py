@@ -8,7 +8,7 @@ import pytz
 from .block import Block, PageBlock, Children, CollectionViewBlock
 from .logger import logger
 from .maps import property_map, field_map
-from .markdown import markdown_to_notion, notion_to_markdown
+from .markdown import markdown_to_notion, notion_to_markdown, notion_to_plaintext
 from .operations import build_operation
 from .records import Record
 from .utils import (
@@ -18,6 +18,11 @@ from .utils import (
     slugify,
 )
 
+def convert_tz(timezone, dt):
+    local = pytz.timezone(timezone)
+    local_dt = local.localize(dt, is_dst=None)
+    utc_dt = local_dt.astimezone(pytz.utc)
+    return utc_dt.isoformat()
 
 class NotionDate(object):
 
@@ -54,13 +59,13 @@ class NotionDate(object):
             data = obj[0][1][0][1]
         else:
             return None
-        start_utc = cls._parse_datetime(data.get("start_date"), data.get("start_time"))
-        end_tc = cls._parse_datetime(data.get("end_date"), data.get("end_time"))
+        start_raw = cls._parse_datetime(data.get("start_date"), data.get("start_time"))
+        end_raw = cls._parse_datetime(data.get("end_date"), data.get("end_time"))
         timezone = data.get("time_zone") or 'UTC'
 
-        start = start_utc.replace(tzinfo=pytz.timezone(timezone)).isoformat()
-        end = end_utc.replace(tzinfo=pytz.timezone(timezone)).isoformat()
-        return cls(start, end=end)
+        start = convert_tz(timezone, start_raw)
+        end = convert_tz(timezone, end_raw)
+        return { 'start': start, 'end': end }
 
     @classmethod
     def _parse_datetime(cls, date_str, time_str):
@@ -517,7 +522,7 @@ class CollectionRowBlock(PageBlock):
     def _convert_notion_to_api(self, val, prop):
 
         if prop["type"] in ["title"]:
-            text = notion_to_markdown(val) if val else None
+            text = notion_to_plaintext(val) if val else None
             val = {
                 "id": prop['id'],
                 "type": "title",
@@ -530,7 +535,7 @@ class CollectionRowBlock(PageBlock):
                 }]
             }
         if prop["type"] in ["text"]:
-            text = notion_to_markdown(val) if val else None
+            text = notion_to_plaintext(val) if val else None
             val = {
                 "id": prop['id'],
                 "type": "text",
@@ -546,10 +551,10 @@ class CollectionRowBlock(PageBlock):
             text = None
             if val is not None:
                 text = val[0][0]
-                if "." in val:
-                    text = float(val)
+                if "." in text:
+                    text = float(text)
                 else:
-                    text = int(val)
+                    text = int(text)
             val = {
                 "id": prop['id'],
                 "type": "number",
@@ -557,7 +562,7 @@ class CollectionRowBlock(PageBlock):
             }
         if prop["type"] in ["select"]:
             text = val[0][0]
-            options = (x for x in prop["select"]["options"] if x['name'] == text)
+            options = list(({'id': x['id'], 'color': x['color'], 'name': x['value']} for x in prop["options"] if x['value'] == text))
 
             if len(options) > 0:
                 val = {
@@ -565,11 +570,11 @@ class CollectionRowBlock(PageBlock):
                     "type": "select",
                     "select": options[0]
                 }
-            else :
+            else:
                 val = None
         if prop["type"] in ["multi_select"]:
             items = [v.strip() for v in val[0][0].split(",")] if val else []
-            options = (x for x in prop["multi_select"]["options"] if x['name'] in items)
+            options = list(({'id': x['id'], 'color': x['color'], 'name': x['value']} for x in prop["options"] if x['value'] in items))
 
             val = {
                 "id": prop['id'],
@@ -585,24 +590,24 @@ class CollectionRowBlock(PageBlock):
             val = {
                 "id": prop['id'],
                 "type": "people",
-                "people": people
+                "people": list(({ "object": "user", "id": p.id, "person": { "email": p.email }, "name": p.full_name } for p in people))
             }
         if prop["type"] in ["email", "phone_number", "url"]:
-            text = val[0][0] if val else ""
-            val {
+            text = val[0][0] if val else None
+            val = {
                 "id": prop['id'],
-                "type": prop['type'],
+                "type": prop['type']
             }
             val[prop['type']] = text
         if prop["type"] in ["date"]:
-            date_obj = NotionDate.from_notion(val)
-            val {
+            date_obj = NotionDate.from_notion_tz(val)
+            val = {
                 "id": prop['id'],
                 "type": prop['type'],
                 "date": date_obj
             }
         if prop["type"] in ["file"]:
-            val = (
+            files = (
                 [
                     add_signed_prefix_as_needed(
                         item[1][0][1], client=self._client, id=self.id
@@ -613,24 +618,34 @@ class CollectionRowBlock(PageBlock):
                 if val
                 else []
             )
+            val = {
+                "id": prop['id'],
+                "type": prop['type'],
+                "files": list(map(lambda x: { 'name': x }, files))
+            }
         if prop["type"] in ["checkbox"]:
-            val = val[0][0] == "Yes" if val else False
+            value = val[0][0] == "Yes" if val else False
+            val = {
+                "id": prop['id'],
+                "type": prop['type'],
+                "checkbox": value
+            }
         if prop["type"] in ["relation"]:
-            val = (
-                [
-                    self._client.get_block(item[1][0][1])
+            val = {
+                "id": prop['id'],
+                "type": prop['type'],
+                "relation": [
+                    { "id": item[1][0][1] }
                     for item in val
                     if item[0] == "‣"
                 ]
-                if val
-                else []
-            )
-        if prop["type"] in ["created_time", "last_edited_time"]:
-            val = self.get(prop["type"])
-            val = datetime.utcfromtimestamp(val / 1000)
-        if prop["type"] in ["created_by", "last_edited_by"]:
-            val = self.get(prop["type"] + "_id")
-            val = self._client.get_user(val)
+            }
+        # if prop["type"] in ["created_time", "last_edited_time"]:
+        #     val = self.get(prop["type"])
+        #     val = datetime.utcfromtimestamp(val / 1000)
+        # if prop["type"] in ["created_by", "last_edited_by"]:
+        #     val = self.get(prop["type"] + "_id")
+        #     val = self._client.get_user(val)
 
         return val
     
@@ -698,6 +713,17 @@ class CollectionRowBlock(PageBlock):
             if "name" in prop:
                 propid = slugify(prop["name"])
                 allprops[propid] = self.get_property(propid)
+        return allprops
+
+    def get_api_properties(self):
+        allprops = {}
+        for prop in self.schema:
+            try :
+                val = self.get_api_property(prop['slug'])
+                if val is not None:
+                    allprops[prop['name']] = val
+            except Exception as e:
+                print(e)
         return allprops
 
     def set_property(self, identifier, val):
