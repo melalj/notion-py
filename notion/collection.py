@@ -707,6 +707,20 @@ class CollectionRowBlock(PageBlock):
 
         return val
 
+    def get_api_object(self):
+        return {
+            "object": "page",
+            "id": self.id,
+            "created_time": datetime.fromtimestamp(self.get("created_time") / 1000).strftime('%Y-%m-%dT%H:%M:%S+00:00'), 
+            "last_edited_time": datetime.fromtimestamp(self.get("last_edited_time") / 1000).strftime('%Y-%m-%dT%H:%M:%S+00:00'), 
+            "parent": {
+                "type": "database_id",
+                "database_id": self.parent.id
+            },
+            "archived": not self.get("alive"),
+            "properties": self.get_api_properties()
+        }
+
     def get_all_properties(self):
         allprops = {}
         for prop in self.schema:
