@@ -393,6 +393,7 @@ class CollectionQuery(object):
         self.type = type
         self.aggregate = _normalize_query_data(aggregate, collection)
         self.aggregations = _normalize_query_data(aggregations, collection)
+        print(filter)
         self.filter = _normalize_query_data(filter, collection)
         self.sort = _normalize_query_data(sort, collection)
         self.calendar_by = _normalize_property_name(calendar_by, collection)
@@ -640,12 +641,22 @@ class CollectionRowBlock(PageBlock):
                     if item[0] == "‣"
                 ]
             }
-        # if prop["type"] in ["created_time", "last_edited_time"]:
-        #     val = self.get(prop["type"])
-        #     val = datetime.utcfromtimestamp(val / 1000)
-        # if prop["type"] in ["created_by", "last_edited_by"]:
-        #     val = self.get(prop["type"] + "_id")
-        #     val = self._client.get_user(val)
+        if prop["type"] in ["created_time", "last_edited_time"]:
+            value = self.get(prop["type"])
+            value = datetime.utcfromtimestamp(value / 1000)
+            val = {
+                "id": prop['id'],
+                "type": prop['type']
+            }
+            val[prop['type']] = value.strftime('%Y-%m-%dT%H:%M:%S+00:00')
+        if prop["type"] in ["created_by", "last_edited_by"]:
+            value = self.get(prop["type"] + "_id")
+            p = self._client.get_user(value)
+            val = {
+                "id": prop['id'],
+                "type": prop['type'],
+            }
+            val[prop['type']] =  { "object": "user", "id": p.id, "person": { "email": p.email }, "name": p.full_name }
 
         return val
     
@@ -711,8 +722,8 @@ class CollectionRowBlock(PageBlock):
         return {
             "object": "page",
             "id": self.id,
-            "created_time": datetime.fromtimestamp(self.get("created_time") / 1000).strftime('%Y-%m-%dT%H:%M:%S+00:00'), 
-            "last_edited_time": datetime.fromtimestamp(self.get("last_edited_time") / 1000).strftime('%Y-%m-%dT%H:%M:%S+00:00'), 
+            "created_time": datetime.utcfromtimestamp(self.get("created_time") / 1000).strftime('%Y-%m-%dT%H:%M:%S+00:00'), 
+            "last_edited_time": datetime.utcfromtimestamp(self.get("last_edited_time") / 1000).strftime('%Y-%m-%dT%H:%M:%S+00:00'), 
             "parent": {
                 "type": "database_id",
                 "database_id": self.parent.id
