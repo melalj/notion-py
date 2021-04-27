@@ -729,7 +729,9 @@ class CollectionRowBlock(PageBlock):
                 "database_id": self.parent.id
             },
             "archived": not self.get("alive"),
-            "properties": self.get_api_properties()
+            "properties": self.get_api_properties(),
+            "icon": self.icon,
+            "cover": self.cover,
         }
 
     def get_all_properties(self):
