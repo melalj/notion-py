@@ -4,6 +4,7 @@ from datetime import datetime, date
 from tzlocal import get_localzone
 from uuid import uuid1
 import pytz
+import traceback
 
 from .block import Block, PageBlock, Children, CollectionViewBlock
 from .logger import logger
@@ -51,11 +52,28 @@ class NotionDate(object):
         reminder = data.get("reminder")
         return cls(start, end=end, timezone=timezone, reminder=reminder)
 
+
+    @classmethod
+    def from_datetime_dict(cls, obj):
+        if isinstance(obj, dict):
+            data = obj
+        else:
+            return None
+        timezone = None
+        reminder = None
+        start = data.get("start")
+        end = data.get("end")
+        if data.get("time_zone"):
+            timezone = data.get("time_zone")
+        if data.get("reminder"):
+            reminder = data.get("reminder")
+        return cls(start, end=end, timezone=timezone, reminder=reminder)
+
     @classmethod
     def from_notion_tz(cls, obj):
         if isinstance(obj, dict):
             data = obj
-        elif isinstance(obj, list):
+        elif isinstance(obj, list) and len(obj) > 0:
             data = obj[0][1][0][1]
         else:
             return None
@@ -98,7 +116,6 @@ class NotionDate(object):
     def to_notion(self):
         if self.end:
             self.start, self.end = sorted([self.start, self.end])
-
         start_date, start_time = self._format_datetime(self.start)
         end_date, end_time = self._format_datetime(self.end)
         reminder = self.reminder
@@ -393,7 +410,6 @@ class CollectionQuery(object):
         self.type = type
         self.aggregate = _normalize_query_data(aggregate, collection)
         self.aggregations = _normalize_query_data(aggregations, collection)
-        print(filter)
         self.filter = _normalize_query_data(filter, collection)
         self.sort = _normalize_query_data(sort, collection)
         self.calendar_by = _normalize_property_name(calendar_by, collection)
@@ -562,17 +578,19 @@ class CollectionRowBlock(PageBlock):
                 "number": text
             }
         if prop["type"] in ["select"]:
-            text = val[0][0]
-            options = list(({'id': x['id'], 'color': x['color'], 'name': x['value']} for x in prop["options"] if x['value'] == text))
+            text = None
+            if val is not None:
+                text = val[0][0]
+                options = list(({'id': x['id'], 'color': x['color'], 'name': x['value']} for x in prop["options"] if x['value'] == text))
 
-            if len(options) > 0:
-                val = {
-                    "id": prop['id'],
-                    "type": "select",
-                    "select": options[0]
-                }
-            else:
-                val = None
+                if len(options) > 0:
+                    val = {
+                        "id": prop['id'],
+                        "type": "select",
+                        "select": options[0]
+                    }
+                else:
+                    val = None
         if prop["type"] in ["multi_select"]:
             items = [v.strip() for v in val[0][0].split(",")] if val else []
             options = list(({'id': x['id'], 'color': x['color'], 'name': x['value']} for x in prop["options"] if x['value'] in items))
@@ -751,6 +769,7 @@ class CollectionRowBlock(PageBlock):
                     allprops[prop['name']] = val
             except Exception as e:
                 print(e)
+                print(traceback.format_exc())
         return allprops
 
     def set_property(self, identifier, val):
@@ -828,10 +847,13 @@ class CollectionRowBlock(PageBlock):
         if prop["type"] in ["email", "phone_number", "url"]:
             val = [[val, [["a", val]]]]
         if prop["type"] in ["date"]:
-            if isinstance(val, date) or isinstance(val, datetime):
-                val = NotionDate(val)
-            if isinstance(val, NotionDate):
-                val = val.to_notion()
+            if val['start']:
+                if isinstance(val['start'], date) or isinstance(val['start'], datetime):
+                    val = NotionDate.from_datetime_dict(val)
+                if isinstance(val, NotionDate):
+                    val = val.to_notion()
+                else:
+                    val = []
             else:
                 val = []
         if prop["type"] in ["file"]:
